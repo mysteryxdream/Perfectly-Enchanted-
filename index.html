@@ -1,3 +1,4 @@
+Index 
 🌅24:00 left
 🪙 0
 
@@ -6,7 +7,7 @@ my perfect day 🧚‍♀️
 tap a location to visit it
 
 🧚‍♀️
-☕café 👗boutique 🌸garden 🏡home 🛍️market 🧚obby 🗝️lost keys 🌳park 📚library 🌷flower shop
+☕café 👗boutique 🌸garden 🏡home 🛍️market 🧚obby 🗝️lost keys 🌳park
 
 pass 3 of 3 — full game · html · css · js
 👑
@@ -14,5 +15,843 @@ perfect day complete
 your 24 minutes are up — here's how your day went.
 start a new day ↺
 ✕
+Script 
 
 
+
+(function(){
+  "use strict";
+
+  // ===== CONFIG =====
+  const DAY_LENGTH_SECONDS = 24 * 60; // 24 real minutes = 24 in-game hours
+  const PHASES = [
+    { name:"morning", from:0,    to:0.25, icon:"🌅", cls:"time-morning" },
+    { name:"day",     from:0.25, to:0.5,  icon:"☀️", cls:"time-day" },
+    { name:"evening", from:0.5,  to:0.75, icon:"🌆", cls:"time-evening" },
+    { name:"night",   from:0.75, to:1.0,  icon:"🌙", cls:"time-night" },
+  ];
+
+  // ===== STATE (exposed on window so Pass 2/3 can hook in) =====
+  const Game = window.FairyGame = window.FairyGame || {};
+  Game.state = {
+    secondsLeft: DAY_LENGTH_SECONDS,
+    coins: 0,
+    running: true,
+    currentPhase: "morning",
+  };
+  Game.locations = {}; // populated below, other passes can read positions
+  Game.addCoins = function(amount){
+    Game.state.coins = Math.max(0, Game.state.coins + amount);
+    document.getElementById("coinCount").textContent = Game.state.coins;
+  };
+  Game.showFeed = function(text){
+    const el = document.getElementById("feedMsg");
+    el.textContent = text;
+    el.classList.add("show");
+    clearTimeout(Game._feedTimer);
+    Game._feedTimer = setTimeout(()=> el.classList.remove("show"), 2600);
+  };
+
+  // ===== DOM refs =====
+  const body = document.body;
+  const fairy = document.getElementById("fairy");
+  const clockPhase = document.getElementById("clockPhase");
+  const clockText = document.getElementById("clockText");
+  const dayringFill = document.getElementById("dayringFill");
+  const titleSub = document.getElementById("titleSub");
+  const endModal = document.getElementById("endModal");
+  const endSummary = document.getElementById("endSummary");
+
+  // ===== map locations: fairy walks here on click =====
+  const locEls = document.querySelectorAll(".location");
+  locEls.forEach(btn=>{
+    const key = btn.id.replace("loc-","");
+    Game.locations[key] = { left: btn.style.left, top: btn.style.top, name: btn.dataset.name };
+    btn.addEventListener("click", ()=> visitLocation(key, btn));
+  });
+
+  function visitLocation(key, btn){
+    fairy.style.left = btn.style.left;
+    fairy.style.top = btn.style.top;
+    titleSub.textContent = `visiting ${btn.dataset.name.toLowerCase()}...`;
+    // small delay so the fairy is seen arriving before the challenge/shop opens
+    setTimeout(()=> Game.onLocationOpen(key, btn.dataset.name), 550);
+  }
+
+  // ===== clock / day-night cycle =====
+  function getPhase(fracElapsed){
+    return PHASES.find(p => fracElapsed >= p.from && fracElapsed < p.to) || PHASES[PHASES.length-1];
+  }
+
+  function tick(){
+    if (!Game.state.running) return;
+    Game.state.secondsLeft -= 1;
+
+    if (Game.state.secondsLeft <= 0){
+      Game.state.secondsLeft = 0;
+      endDay();
+      return;
+    }
+
+    const elapsed = DAY_LENGTH_SECONDS - Game.state.secondsLeft;
+    const frac = elapsed / DAY_LENGTH_SECONDS;
+    const phase = getPhase(frac);
+
+    if (phase.name !== Game.state.currentPhase){
+      Game.state.currentPhase = phase.name;
+      body.classList.remove("time-morning","time-day","time-evening","time-night");
+      body.classList.add(phase.cls);
+      Game.showFeed(`${phase.icon} ${phase.name} has arrived`);
+    }
+
+    clockPhase.textContent = phase.icon;
+    const mm = Math.floor(Game.state.secondsLeft/60).toString().padStart(2,"0");
+    const ss = (Game.state.secondsLeft%60).toString().padStart(2,"0");
+    clockText.textContent = `${mm}:${ss} left`;
+    dayringFill.style.width = (frac*100).toFixed(2) + "%";
+
+    setTimeout(tick, 1000);
+  }
+
+  function endDay(){
+    Game.state.running = false;
+    clearTimeout(Game._eventTimer);
+    const itemCount = Game.owned.size - 2; // minus the two free defaults
+    endSummary.textContent = `you finished with 🪙 ${Game.state.coins} coins and ${Math.max(0,itemCount)} items collected. a perfect day, well spent.`;
+    endModal.classList.add("show");
+  }
+
+  document.getElementById("restartDayBtn").addEventListener("click", ()=>{
+    Game.state.secondsLeft = DAY_LENGTH_SECONDS;
+    Game.state.running = true;
+    Game.state.currentPhase = "morning";
+    body.classList.remove("time-day","time-evening","time-night");
+    body.classList.add("time-morning");
+    endModal.classList.remove("show");
+    tick();
+    scheduleNextEvent();
+  });
+
+  // ================= PASS 2: challenges =================
+  const challengeOverlay = document.getElementById("challengeOverlay");
+  const challengeContent = document.getElementById("challengeContent");
+
+  function openChallengeOverlay(){ challengeOverlay.classList.add("show"); }
+  function closeChallengeOverlay(){
+    if (Game._activeCleanup){ Game._activeCleanup(); Game._activeCleanup = null; }
+    challengeOverlay.classList.remove("show");
+  }
+  document.getElementById("challengeCloseBtn").addEventListener("click", closeChallengeOverlay);
+
+  function showChallengeResult(emoji, title, desc, coins){
+    if (Game._activeCleanup){ Game._activeCleanup(); Game._activeCleanup = null; }
+    challengeContent.innerHTML = `
+      <div class="challenge-result">
+        <div style="font-size:2.2rem;">${emoji}</div>
+        <h2>${title}</h2>
+        <p style="color:var(--plum-soft); font-size:.9rem;">${desc}</p>
+        <div class="challenge-result__coins">+${coins} 🪙</div>
+        <button id="collectCoinsBtn">collect &amp; continue</button>
+      </div>`;
+    document.getElementById("collectCoinsBtn").addEventListener("click", ()=>{
+      Game.addCoins(coins);
+      Game.showFeed(`+${coins} 🪙 from ${title}`);
+      closeChallengeOverlay();
+    });
+  }
+
+  // ---------- 1. Lost Keys ----------
+  function startLostKeys(){
+    const total = 12, keyCount = 3;
+    const keyIndices = new Set();
+    while (keyIndices.size < keyCount) keyIndices.add(Math.floor(Math.random()*total));
+    let found = 0, clicks = 0;
+
+    challengeContent.innerHTML = `
+      <h2>🗝️ Lost Keys</h2>
+      <p class="challenge-modal__intro">Three keys are hidden in the grass — tap tiles to search.</p>
+      <div class="tile-grid" id="keysGrid"></div>
+      <p class="challenge-status" id="keysStatus">found 0 / 3</p>`;
+
+    const grid = document.getElementById("keysGrid");
+    for (let i=0;i<total;i++){
+      const btn = document.createElement("button");
+      btn.className = "tile"; btn.type = "button"; btn.textContent = "🌿";
+      btn.addEventListener("click", ()=>{
+        if (btn.disabled) return;
+        clicks++;
+        if (keyIndices.has(i)){
+          btn.textContent = "🗝️"; btn.classList.add("found"); btn.disabled = true;
+          found++;
+          document.getElementById("keysStatus").textContent = `found ${found} / ${keyCount}`;
+          if (found === keyCount){
+            const coins = Math.max(10, 34 - (clicks-3)*4);
+            showChallengeResult("🗝️", "keys found!", `you found all three keys in ${clicks} tries.`, coins);
+          }
+        } else {
+          btn.textContent = "🍃"; btn.classList.add("empty-hit"); btn.disabled = true;
+          setTimeout(()=>{ if (btn.isConnected){ btn.textContent = "🌿"; btn.classList.remove("empty-hit"); btn.disabled = false; } }, 500);
+        }
+      });
+      grid.appendChild(btn);
+    }
+    Game._activeCleanup = ()=>{};
+    openChallengeOverlay();
+  }
+
+  // ---------- 2. Fairy Obby ----------
+  function startFairyObby(){
+    const rounds = 5;
+    let round = 0, passes = 0, animId = null, pos = 0, dir = 1, zoneLeft = 0;
+
+    challengeContent.innerHTML = `
+      <h2>🧚 Fairy Obby</h2>
+      <p class="challenge-modal__intro">Click Jump when your fairy is inside the pink zone!</p>
+      <div class="obby-rounds" id="obbyDots"></div>
+      <div class="obby-track" id="obbyTrack">
+        <div class="obby-track__zone" id="obbyZone"></div>
+        <div class="obby-track__marker" id="obbyMarker">🧚</div>
+      </div>
+      <button class="jump-btn" id="jumpBtn">Jump!</button>
+      <p class="challenge-status" id="obbyStatus">round 1 of ${rounds}</p>`;
+
+    const dotsWrap = document.getElementById("obbyDots");
+    for (let i=0;i<rounds;i++){ const d = document.createElement("span"); d.className = "obby-rounds__dot"; dotsWrap.appendChild(d); }
+
+    function randomZone(){
+      const left = 15 + Math.random()*55;
+      document.getElementById("obbyZone").style.left = left + "%";
+      return left;
+    }
+    zoneLeft = randomZone();
+
+    function animate(){
+      pos += dir * 1.4;
+      if (pos >= 100){ pos = 100; dir = -1; }
+      if (pos <= 0){ pos = 0; dir = 1; }
+      document.getElementById("obbyMarker").style.left = pos + "%";
+      animId = requestAnimationFrame(animate);
+    }
+    animId = requestAnimationFrame(animate);
+
+    function handleJump(){
+      const zoneWidth = 18;
+      const inZone = pos >= zoneLeft && pos <= zoneLeft + zoneWidth;
+      const dot = dotsWrap.children[round];
+      dot.classList.add(inZone ? "pass" : "fail");
+      if (inZone) passes++;
+      round++;
+      if (round >= rounds){
+        cancelAnimationFrame(animId);
+        const coins = Math.max(5, passes*8 + (passes===rounds ? 10 : 0));
+        showChallengeResult("🧚", passes===rounds ? "flawless flight!" : "obby cleared", `you landed ${passes} of ${rounds} jumps.`, coins);
+      } else {
+        document.getElementById("obbyStatus").textContent = `round ${round+1} of ${rounds}`;
+        zoneLeft = randomZone();
+        pos = 0; dir = 1;
+      }
+    }
+    document.getElementById("jumpBtn").addEventListener("click", handleJump);
+    Game._activeCleanup = ()=>{ if (animId) cancelAnimationFrame(animId); };
+    openChallengeOverlay();
+  }
+
+  // ---------- 3. Perfect Outfit ----------
+  function startPerfectOutfit(){
+    const themes = [
+      { name:"Garden Party", wings:1, top:0, acc:2 },
+      { name:"Moonlight Ball", wings:2, top:1, acc:0 },
+      { name:"Meadow Picnic", wings:0, top:2, acc:1 },
+    ];
+    const theme = themes[Math.floor(Math.random()*themes.length)];
+    const wingsOpts = ["🦋","🪽","✨"];
+    const topOpts = ["🌸","💫","🍃"];
+    const accOpts = ["🎀","👑","🔮"];
+    const picks = { wings:null, top:null, acc:null };
+
+    challengeContent.innerHTML = `
+      <h2>👗 Perfect Outfit</h2>
+      <p class="challenge-modal__intro">Theme: <strong>${theme.name}</strong> — pick the pieces that fit best.</p>
+      <div class="outfit-category"><p class="outfit-category__label">wings</p><div class="outfit-options" id="wingsOpts"></div></div>
+      <div class="outfit-category"><p class="outfit-category__label">top</p><div class="outfit-options" id="topOpts"></div></div>
+      <div class="outfit-category"><p class="outfit-category__label">accessory</p><div class="outfit-options" id="accOpts"></div></div>
+      <button class="jump-btn" id="outfitSubmit" disabled>reveal your fairy ✨</button>`;
+
+    function renderGroup(id, opts, key){
+      const wrap = document.getElementById(id);
+      opts.forEach((emoji, idx)=>{
+        const b = document.createElement("button");
+        b.className = "outfit-option"; b.type = "button"; b.textContent = emoji;
+        b.addEventListener("click", ()=>{
+          [...wrap.children].forEach(c=>c.classList.remove("picked"));
+          b.classList.add("picked");
+          picks[key] = idx;
+          document.getElementById("outfitSubmit").disabled = !(picks.wings!==null && picks.top!==null && picks.acc!==null);
+        });
+        wrap.appendChild(b);
+      });
+    }
+    renderGroup("wingsOpts", wingsOpts, "wings");
+    renderGroup("topOpts", topOpts, "top");
+    renderGroup("accOpts", accOpts, "acc");
+
+    document.getElementById("outfitSubmit").addEventListener("click", ()=>{
+      let matches = 0;
+      if (picks.wings === theme.wings) matches++;
+      if (picks.top === theme.top) matches++;
+      if (picks.acc === theme.acc) matches++;
+      const coins = Math.max(6, matches*12 + (matches===3 ? 14 : 0));
+      const label = matches===3 ? "perfect match!" : matches===2 ? "lovely fit" : "a bold choice";
+      showChallengeResult("👗", label, `your outfit matched ${matches} of 3 pieces for ${theme.name}.`, coins);
+    });
+
+    Game._activeCleanup = ()=>{};
+    openChallengeOverlay();
+  }
+
+  // ---------- 4. Enchanted Garden ----------
+  function startEnchantedGarden(){
+    const duration = 15, size = 9;
+    let timeLeft = duration, score = 0, spawnTimer = null, countdownTimer = null;
+
+    challengeContent.innerHTML = `
+      <h2>🌸 Enchanted Garden</h2>
+      <p class="challenge-modal__intro">Tap the sparkling flowers before they vanish!</p>
+      <div class="challenge-timer"><div class="challenge-timer__fill" id="gardenTimerFill"></div></div>
+      <div class="tile-grid" id="gardenGrid"></div>
+      <p class="challenge-status" id="gardenStatus">score: 0</p>`;
+
+    const grid = document.getElementById("gardenGrid");
+    const tiles = [];
+    for (let i=0;i<size;i++){
+      const btn = document.createElement("button");
+      btn.className = "tile"; btn.type = "button"; btn.textContent = "🌿"; btn.dataset.active = "0";
+      btn.addEventListener("click", ()=>{
+        if (btn.dataset.active === "1"){
+          score++;
+          document.getElementById("gardenStatus").textContent = `score: ${score}`;
+          btn.dataset.active = "0"; btn.textContent = "🌿"; btn.classList.remove("found");
+        }
+      });
+      grid.appendChild(btn); tiles.push(btn);
+    }
+
+    function spawn(){
+      tiles.forEach(t=>{ if (t.dataset.active === "1"){ t.dataset.active = "0"; t.textContent = "🌿"; t.classList.remove("found"); } });
+      const idx = Math.floor(Math.random()*size);
+      tiles[idx].dataset.active = "1";
+      tiles[idx].textContent = "🌸";
+      tiles[idx].classList.add("found");
+      spawnTimer = setTimeout(spawn, 750);
+    }
+    spawn();
+
+    countdownTimer = setInterval(()=>{
+      timeLeft--;
+      document.getElementById("gardenTimerFill").style.width = (timeLeft/duration*100) + "%";
+      if (timeLeft <= 0){
+        clearInterval(countdownTimer); clearTimeout(spawnTimer);
+        const coins = Math.max(8, Math.min(60, score*6));
+        showChallengeResult("🌸", score>=6 ? "garden in full bloom!" : "garden explored", `you gathered ${score} sparkles.`, coins);
+      }
+    }, 1000);
+
+    Game._activeCleanup = ()=>{ clearInterval(countdownTimer); clearTimeout(spawnTimer); };
+    openChallengeOverlay();
+  }
+
+  // ---------- 5. Cooking Chaos ----------
+  function startCookingChaos(){
+    const icons = ["☕","🥐","🍰","🍓","🧁","🍯","🥧","🍵"];
+    const orders = 3, perOrderTime = 10;
+    let orderNum = 0, score = 0, currentOrder = [], progress = 0, timeLeft = 0, timer = null;
+
+    challengeContent.innerHTML = `
+      <h2>🍳 Cooking Chaos</h2>
+      <p class="challenge-modal__intro">Serve each order by tapping the ingredients in the order shown!</p>
+      <div class="challenge-timer"><div class="challenge-timer__fill" id="cookTimerFill"></div></div>
+      <div class="order-ticket"><p class="order-ticket__label">order <span id="cookOrderNum">1</span> of ${orders}</p><div class="order-ticket__items" id="cookOrderItems"></div></div>
+      <div class="cook-options" id="cookOptions"></div>
+      <p class="cook-score" id="cookScore">served: 0 / ${orders}</p>`;
+
+    const optWrap = document.getElementById("cookOptions");
+    icons.forEach(icon=>{
+      const b = document.createElement("button");
+      b.className = "cook-option"; b.type = "button"; b.textContent = icon;
+      b.addEventListener("click", ()=> handleIngredient(icon, b));
+      optWrap.appendChild(b);
+    });
+
+    function newOrder(){
+      orderNum++;
+      progress = 0;
+      const len = 2 + Math.floor(Math.random()*2);
+      currentOrder = Array.from({length:len}, ()=> icons[Math.floor(Math.random()*icons.length)]);
+      document.getElementById("cookOrderNum").textContent = orderNum;
+      document.getElementById("cookOrderItems").textContent = currentOrder.join(" ");
+      timeLeft = perOrderTime;
+      document.getElementById("cookTimerFill").style.width = "100%";
+      clearInterval(timer);
+      timer = setInterval(()=>{
+        timeLeft -= 0.2;
+        document.getElementById("cookTimerFill").style.width = Math.max(0, (timeLeft/perOrderTime*100)) + "%";
+        if (timeLeft <= 0){ clearInterval(timer); nextOrFinish(); }
+      }, 200);
+    }
+
+    function handleIngredient(icon, btn){
+      if (icon === currentOrder[progress]){
+        progress++;
+        if (progress === currentOrder.length){
+          clearInterval(timer);
+          score++;
+          document.getElementById("cookScore").textContent = `served: ${score} / ${orders}`;
+          nextOrFinish();
+        }
+      } else {
+        btn.classList.add("wrong-flash");
+        setTimeout(()=> btn.classList.remove("wrong-flash"), 250);
+      }
+    }
+
+    function nextOrFinish(){
+      if (orderNum >= orders){
+        const coins = Math.max(8, score*15);
+        showChallengeResult("🍳", score===orders ? "kitchen hero!" : "orders served", `you completed ${score} of ${orders} orders.`, coins);
+      } else {
+        newOrder();
+      }
+    }
+    newOrder();
+
+    Game._activeCleanup = ()=>{ clearInterval(timer); };
+    openChallengeOverlay();
+  }
+
+  // ================= PASS 3: shops, customization, random events =================
+
+  // ---------- catalog ----------
+  const CATALOG = {
+    wings: [
+      { id:"w1", name:"Petal Wings", emoji:"🦋", price:0 },
+      { id:"w2", name:"Glass Wings", emoji:"🪽", price:40 },
+      { id:"w3", name:"Starlight Wings", emoji:"✨", price:90 },
+    ],
+    accessories: [
+      { id:"a1", name:"Daisy Crown", emoji:"🌼", price:0 },
+      { id:"a2", name:"Royal Tiara", emoji:"👑", price:60 },
+      { id:"a3", name:"Moon Charm", emoji:"🔮", price:100 },
+    ],
+    home: [
+      { id:"h1", name:"Mushroom Lamp", emoji:"🍄", price:30 },
+      { id:"h2", name:"Flower Bed", emoji:"🛏️", price:55 },
+      { id:"h3", name:"Star Window", emoji:"🌠", price:85 },
+    ],
+    market: [
+      { id:"m1", name:"Lucky Charm", emoji:"🍀", price:35 },
+      { id:"m2", name:"Dream Jar", emoji:"🫙", price:50 },
+      { id:"m3", name:"Tiny Lantern", emoji:"🏮", price:45 },
+    ],
+  };
+
+  Game.wardrobe = { wings:"w1", accessory:"a1" };
+  Game.owned = new Set(["w1","a1"]);
+
+  function renderAvatar(){
+    const wing = CATALOG.wings.find(w=>w.id===Game.wardrobe.wings);
+    const acc = CATALOG.accessories.find(a=>a.id===Game.wardrobe.accessory);
+    fairy.textContent = `${acc.emoji}🧚‍♀️${wing.emoji}`;
+  }
+
+  // ---------- generic shop screen ----------
+  function openShop(title, emoji, categories, defaultCat){
+    let activeCat = defaultCat;
+
+    function render(){
+      const items = CATALOG[activeCat];
+      const isWardrobe = activeCat === "wings" || activeCat === "accessories";
+      challengeContent.innerHTML = `
+        <h2>${emoji} ${title}</h2>
+        <div class="avatar-preview" id="shopAvatarPreview"></div>
+        <div class="shop-tabs" id="shopTabs"></div>
+        <div class="shop-grid" id="shopGrid"></div>
+        <p class="challenge-status">🪙 ${Game.state.coins} coins</p>`;
+
+      if (isWardrobe) document.getElementById("shopAvatarPreview").textContent = fairy.textContent;
+      else document.getElementById("shopAvatarPreview").remove();
+
+      const tabsWrap = document.getElementById("shopTabs");
+      categories.forEach(cat=>{
+        const b = document.createElement("button");
+        b.className = "shop-tab" + (cat.key===activeCat ? " active" : "");
+        b.type = "button"; b.textContent = cat.label;
+        b.addEventListener("click", ()=>{ activeCat = cat.key; render(); });
+        tabsWrap.appendChild(b);
+      });
+
+      const grid = document.getElementById("shopGrid");
+      items.forEach(item=>{
+        const owned = Game.owned.has(item.id);
+        const equipped = isWardrobe && (Game.wardrobe.wings===item.id || Game.wardrobe.accessory===item.id);
+        const btn = document.createElement("button");
+        btn.className = "shop-item" + (owned ? " owned" : "") + (equipped ? " equipped" : "");
+        btn.type = "button";
+        btn.disabled = !owned && item.price > Game.state.coins;
+        btn.innerHTML = `
+          <span class="shop-item__emoji">${item.emoji}</span>
+          <span class="shop-item__name">${item.name}</span>
+          <span class="shop-item__price">${owned ? (equipped ? "equipped" : "tap to equip") : "🪙 " + item.price}</span>`;
+        btn.addEventListener("click", ()=>{
+          if (!owned){
+            if (item.price > Game.state.coins) return;
+            Game.addCoins(-item.price);
+            Game.owned.add(item.id);
+            Game.showFeed(`bought ${item.name} 🪙-${item.price}`);
+          }
+          if (isWardrobe){
+            if (activeCat === "wings") Game.wardrobe.wings = item.id;
+            else Game.wardrobe.accessory = item.id;
+            renderAvatar();
+          } else {
+            Game.showFeed(`${item.name} added to your ${title.toLowerCase()} ✨`);
+          }
+          render();
+        });
+        grid.appendChild(btn);
+      });
+    }
+    render();
+    Game._activeCleanup = ()=>{};
+    openChallengeOverlay();
+  }
+
+  function startBoutique(){
+    openShop("Fairy Boutique", "👗",
+      [{key:"wings",label:"wings"},{key:"accessories",label:"accessories"}], "wings");
+  }
+  function startHome(){
+    openShop("Fairy Home", "🏡", [{key:"home",label:"decor"}], "home");
+  }
+  function startMarket(){
+    openShop("Fairy Market", "🛍️", [{key:"market",label:"lifestyle"}], "market");
+  }
+  function startPark(){
+    // light activity: quick relaxing mini-interaction, small guaranteed coin reward
+    challengeContent.innerHTML = `
+      <h2>🌳 Fairy Park</h2>
+      <p class="challenge-modal__intro">You wander the park, greet fellow fairies, and rest under a blossom tree.</p>
+      <p style="text-align:center; font-size:2rem;">🌳🦋🌼</p>
+      <button class="jump-btn" id="parkContinue">continue your day</button>`;
+    document.getElementById("parkContinue").addEventListener("click", ()=>{
+      showChallengeResult("🌳", "peaceful stroll", "a little rest is part of a perfect day too.", 8);
+    });
+    Game._activeCleanup = ()=>{};
+    openChallengeOverlay();
+  }
+
+  // ---------- random events ----------
+  const EVENTS = [
+    { icon:"🌙", name:"Nightfall", msg:"Nightfall settles early — the sky dims softly.", effect:()=>{} },
+    { icon:"🧚", name:"Pixie Storm", msg:"A Pixie Storm swirls through! +15 🪙", effect:()=>Game.addCoins(15) },
+    { icon:"🔐", name:"Lockdown", msg:"A gentle Lockdown — the market closes for a moment.", effect:()=>{} },
+    { icon:"🌸", name:"Flower Bloom", msg:"A Flower Bloom bursts across the garden! +10 🪙", effect:()=>Game.addCoins(10) },
+    { icon:"💎", name:"Treasure Drop", msg:"A Treasure Drop sparkles nearby! +25 🪙", effect:()=>Game.addCoins(25) },
+    { icon:"🌀", name:"Fairy Portal", msg:"A Fairy Portal hums to life, humming with magic.", effect:()=>{} },
+    { icon:"🌧️", name:"Enchanted Rain", msg:"Enchanted Rain falls — every petal glimmers.", effect:()=>{} },
+    { icon:"🦋", name:"Butterfly Swarm", msg:"A Butterfly Swarm drifts past! +12 🪙", effect:()=>Game.addCoins(12) },
+  ];
+  const eventBanner = document.getElementById("eventBanner");
+
+  function triggerRandomEvent(){
+    if (!Game.state.running) return;
+    const ev = EVENTS[Math.floor(Math.random()*EVENTS.length)];
+    ev.effect();
+    eventBanner.innerHTML = `<span>${ev.icon}</span><span>${ev.msg}</span>`;
+    eventBanner.classList.add("show");
+    setTimeout(()=> eventBanner.classList.remove("show"), 3200);
+  }
+
+  function scheduleNextEvent(){
+    // a random event roughly every 2.5-4.5 in-game minutes (150-270 real seconds)
+    const delay = (150 + Math.random()*120) * 1000;
+    Game._eventTimer = setTimeout(()=>{
+      triggerRandomEvent();
+      scheduleNextEvent();
+    }, delay);
+  }
+
+  // ---------- router: wires the map to the games/shops above ----------
+  Game.onLocationOpen = function(key, name){
+    switch (key){
+      case "keys":     startLostKeys(); break;
+      case "obby":     startFairyObby(); break;
+      case "boutique": startPerfectOutfit(); break;
+      case "garden":   startEnchantedGarden(); break;
+      case "cafe":     startCookingChaos(); break;
+      case "home":     startHome(); break;
+      case "market":   startMarket(); break;
+      case "park":     startPark(); break;
+      default: Game.showFeed(`${name} isn't ready yet`);
+    }
+  };
+
+  renderAvatar();
+  scheduleNextEvent();
+
+  // ===== boot =====
+  body.classList.add("time-morning");
+  tick();
+})();
+
+
+
+
+
+Cs 
+
+:root {
+  --lilac:#E7D9FF; --pink:#FFD3E9; --mint:#C9F7E4; --sky:#C9E4FF;
+  --plum:#4A3B63; --plum-soft:#7A6A93; --glow:#FF8FD8; --glow-soft:#C9B6FF;
+  --white:#FFFBFF; --gold:#FFD873;
+  --night-a:#2B2249; --night-b:#4A3B7A; --night-glow:#B9A6FF;
+  --font-display:'Dancing Script',cursive;
+  --font-body:'Outfit',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-mono:'Space Mono','Courier New',monospace;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; min-height:100%; overflow-x:hidden; }
+body {
+  font-family:var(--font-body); color:var(--plum);
+  min-height:100vh; min-height:100dvh;
+  display:flex; flex-direction:column; align-items:center;
+  background:linear-gradient(180deg,var(--sky),var(--lilac) 60%,var(--pink));
+  transition:background 3s ease;
+  position:relative;
+}
+body.time-evening { background:linear-gradient(180deg,#FFC9A8,var(--pink) 55%,var(--lilac)); }
+body.time-night   { background:linear-gradient(180deg,var(--night-a),var(--night-b) 70%,#5A4A8A); color:#EDE6FF; }
+
+@media (prefers-reduced-motion:reduce){ *,body{ transition-duration:.01ms !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; } }
+
+/* ---------- top bar: clock + coins ---------- */
+.topbar {
+  width:100%; max-width:720px; display:flex; align-items:center; justify-content:space-between;
+  gap:12px; padding:14px clamp(12px,4vw,20px); position:relative; z-index:3;
+}
+.clock {
+  font-family:var(--font-mono); font-size:.85rem; letter-spacing:.04em;
+  background:rgba(255,255,255,.55); border:1px solid rgba(255,255,255,.8);
+  backdrop-filter:blur(6px); border-radius:999px; padding:8px 16px;
+  display:flex; align-items:center; gap:8px; box-shadow:0 4px 16px rgba(120,90,160,.15);
+}
+body.time-night .clock { background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.25); color:#EDE6FF; }
+.clock__phase { font-size:1rem; }
+.coins {
+  font-family:var(--font-mono); font-size:.85rem; font-weight:700;
+  background:linear-gradient(120deg,var(--gold),#FFE9A8); color:#5C4400;
+  border-radius:999px; padding:8px 16px; display:flex; align-items:center; gap:6px;
+  box-shadow:0 4px 16px rgba(255,216,115,.4);
+}
+
+/* ---------- day progress ribbon ---------- */
+.dayring-wrap { width:100%; max-width:720px; padding:0 clamp(12px,4vw,20px); position:relative; z-index:3; }
+.dayring { height:10px; border-radius:999px; background:rgba(255,255,255,.4); overflow:hidden; }
+body.time-night .dayring { background:rgba(255,255,255,.12); }
+.dayring__fill { height:100%; width:0%; background:linear-gradient(90deg,var(--sky),var(--glow-soft),var(--glow)); transition:width 1s linear; }
+.dayring__labels { display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:.62rem; letter-spacing:.06em; opacity:.7; margin-top:5px; text-transform:uppercase; }
+
+/* ---------- title ---------- */
+.title-wrap { text-align:center; margin:18px 0 8px; position:relative; z-index:3; }
+.title-wrap h1 { margin:0; font-family:var(--font-body); font-weight:600; font-size:clamp(1.6rem,6vw,2.2rem); letter-spacing:-0.01em; }
+.title-wrap h1 span { font-family:var(--font-display); font-weight:700; font-size:1.3em; background:linear-gradient(90deg,var(--glow),var(--glow-soft)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.title-sub { font-family:var(--font-mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--plum-soft); margin:2px 0 0; }
+body.time-night .title-sub { color:#C9B9FF; }
+
+/* ---------- map ---------- */
+.map-wrap { position:relative; width:min(720px,100%); aspect-ratio:16/11; margin:14px auto 0; z-index:2; }
+.map {
+  position:relative; width:100%; height:100%; border-radius:28px; overflow:hidden;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(255,255,255,.55) 0%, transparent 40%),
+    radial-gradient(circle at 85% 75%, rgba(255,255,255,.4) 0%, transparent 45%),
+    linear-gradient(160deg,var(--mint) 0%, var(--sky) 45%, var(--lilac) 100%);
+  box-shadow:0 20px 50px rgba(150,120,200,.28);
+  border:1px solid rgba(255,255,255,.7);
+  transition:filter 2s ease;
+}
+body.time-evening .map { filter:brightness(.92) saturate(1.05) hue-rotate(-6deg); }
+body.time-night .map { filter:brightness(.55) saturate(.85) hue-rotate(-10deg); }
+
+.map__stars { position:absolute; inset:0; opacity:0; transition:opacity 2s ease; pointer-events:none;
+  background-image:radial-gradient(circle,#fff 1.2px,transparent 1.2px);
+  background-size:36px 36px; }
+body.time-night .map__stars { opacity:.55; }
+
+.location {
+  position:absolute; transform:translate(-50%,-50%);
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  background:none; border:none; cursor:pointer; font-family:var(--font-body);
+  padding:0; -webkit-tap-highlight-color:transparent;
+}
+.location__bubble {
+  width:clamp(46px,9vw,60px); height:clamp(46px,9vw,60px); border-radius:50%;
+  background:rgba(255,255,255,.85); display:flex; align-items:center; justify-content:center;
+  font-size:clamp(1.3rem,4vw,1.7rem); box-shadow:0 8px 20px rgba(120,90,160,.3);
+  border:2px solid rgba(255,255,255,.9); transition:transform .2s ease, box-shadow .2s ease;
+}
+.location:hover .location__bubble, .location:focus-visible .location__bubble { transform:translateY(-4px) scale(1.08); box-shadow:0 12px 26px rgba(120,90,160,.4); }
+.location:focus-visible { outline:none; }
+.location:focus-visible .location__bubble { outline:3px solid var(--plum); outline-offset:2px; }
+.location__label {
+  font-size:.62rem; font-family:var(--font-mono); letter-spacing:.03em; text-transform:uppercase;
+  background:rgba(255,255,255,.75); padding:2px 8px; border-radius:999px; white-space:nowrap;
+  color:var(--plum);
+}
+body.time-night .location__label { background:rgba(255,255,255,.2); color:#EDE6FF; }
+
+/* fairy */
+.fairy {
+  position:absolute; width:clamp(38px,8vw,50px); height:clamp(38px,8vw,50px);
+  transform:translate(-50%,-100%); transition:left 1.1s cubic-bezier(.5,0,.2,1), top 1.1s cubic-bezier(.5,0,.2,1);
+  z-index:5; pointer-events:none; display:flex; align-items:center; justify-content:center;
+  font-size:clamp(1.6rem,6vw,2.1rem); filter:drop-shadow(0 6px 10px rgba(120,90,160,.35));
+  animation:hover 2.2s ease-in-out infinite;
+}
+@keyframes hover { 0%,100%{ transform:translate(-50%,-100%) translateY(0); } 50%{ transform:translate(-50%,-100%) translateY(-8px); } }
+
+/* ---------- toast / feed ---------- */
+.feed {
+  width:min(720px,100%); margin:14px auto 0; padding:0 clamp(12px,4vw,20px);
+  position:relative; z-index:3;
+}
+.feed__msg {
+  font-family:var(--font-mono); font-size:.72rem; text-align:center;
+  background:rgba(255,255,255,.55); border:1px solid rgba(255,255,255,.8);
+  border-radius:14px; padding:9px 14px; opacity:0; transform:translateY(6px);
+  transition:opacity .35s ease, transform .35s ease; color:var(--plum-soft);
+}
+body.time-night .feed__msg { background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.2); color:#D9CFFF; }
+.feed__msg.show { opacity:1; transform:translateY(0); }
+
+/* ---------- end of day modal ---------- */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(40,25,60,.55); backdrop-filter:blur(4px);
+  display:none; align-items:center; justify-content:center; z-index:20; padding:20px;
+}
+.modal-overlay.show { display:flex; }
+.modal {
+  width:min(420px,100%); background:var(--white); border-radius:28px; padding:34px 26px;
+  text-align:center; box-shadow:0 24px 60px rgba(80,50,120,.4);
+}
+.modal h2 { font-family:var(--font-display); font-size:2rem; margin:6px 0 10px; color:var(--plum); }
+.modal p { font-family:var(--font-body); color:var(--plum-soft); font-size:.92rem; line-height:1.5; margin:0 0 20px; }
+.modal button {
+  font-family:var(--font-body); font-weight:600; font-size:.92rem; padding:12px 26px;
+  border-radius:999px; border:none; cursor:pointer; color:var(--white);
+  background:linear-gradient(120deg,#FF9EDB,#B6A6FF); box-shadow:0 8px 22px rgba(255,143,216,.4);
+}
+.modal button:focus-visible { outline:3px solid var(--plum); outline-offset:3px; }
+
+.footer { font-family:var(--font-mono); font-size:.65rem; letter-spacing:.05em; opacity:.55; margin:20px 0 10px; position:relative; z-index:3; }
+
+/* ---------- challenge modal (Pass 2) ---------- */
+.challenge-modal { width:min(480px,100%); max-height:88vh; overflow-y:auto; text-align:left; }
+.challenge-modal h2 { text-align:center; }
+.challenge-modal__intro { font-size:.85rem; color:var(--plum-soft); text-align:center; margin:0 0 18px; }
+.challenge-modal__close {
+  position:absolute; top:14px; right:18px; background:none !important; box-shadow:none !important;
+  color:var(--plum-soft) !important; font-size:1.1rem !important; padding:4px 8px !important; width:auto;
+}
+.challenge-timer { height:8px; border-radius:999px; background:rgba(74,59,99,.12); overflow:hidden; margin:0 0 18px; }
+.challenge-timer__fill { height:100%; width:100%; background:linear-gradient(90deg,var(--glow-soft),var(--glow)); transition:width .2s linear; }
+.challenge-status { text-align:center; font-family:var(--font-mono); font-size:.75rem; color:var(--plum-soft); margin:14px 0 0; min-height:1.2em; }
+.challenge-result { text-align:center; padding:10px 0 4px; }
+.challenge-result__coins { font-family:var(--font-mono); font-size:1.4rem; font-weight:700; color:#B88A00; margin:8px 0 18px; }
+
+/* Lost Keys / Enchanted Garden: tile grid */
+.tile-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:0 0 6px; }
+.tile {
+  aspect-ratio:1; border-radius:16px; border:none; cursor:pointer;
+  background:linear-gradient(160deg,var(--mint),var(--sky));
+  display:flex; align-items:center; justify-content:center; font-size:1.4rem;
+  transition:transform .15s ease; box-shadow:inset 0 0 0 1px rgba(255,255,255,.6);
+}
+.tile:hover:not(:disabled) { transform:scale(1.06); }
+.tile:focus-visible { outline:3px solid var(--plum); outline-offset:2px; }
+.tile:disabled { cursor:default; }
+.tile.found { background:linear-gradient(160deg,#FFE9A8,var(--gold)); }
+.tile.empty-hit { background:rgba(74,59,99,.06); }
+
+/* Fairy Obby: jump track */
+.obby-track { position:relative; height:64px; background:rgba(74,59,99,.08); border-radius:16px; margin:0 0 16px; overflow:hidden; }
+.obby-track__zone { position:absolute; top:0; bottom:0; width:18%; background:rgba(255,143,216,.35); border-left:2px dashed var(--glow); border-right:2px dashed var(--glow); }
+.obby-track__marker { position:absolute; top:8px; width:48px; height:48px; display:flex; align-items:center; justify-content:center; font-size:1.6rem; transition:left .05s linear; }
+.obby-rounds { display:flex; gap:6px; justify-content:center; margin-bottom:14px; }
+.obby-rounds__dot { width:10px; height:10px; border-radius:50%; background:rgba(74,59,99,.15); }
+.obby-rounds__dot.pass { background:var(--glow); }
+.obby-rounds__dot.fail { background:#D9A0A0; }
+.jump-btn {
+  display:block; margin:0 auto; font-family:var(--font-body); font-weight:700; font-size:1rem;
+  padding:14px 40px; border-radius:999px; border:none; cursor:pointer; color:var(--white);
+  background:linear-gradient(120deg,#FF9EDB,#B6A6FF); box-shadow:0 8px 22px rgba(255,143,216,.4);
+}
+.jump-btn:focus-visible { outline:3px solid var(--plum); outline-offset:3px; }
+
+/* Perfect Outfit: category picker */
+.outfit-category { margin:0 0 18px; }
+.outfit-category__label { font-family:var(--font-mono); font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; color:var(--plum-soft); margin:0 0 8px; }
+.outfit-options { display:flex; gap:10px; }
+.outfit-option {
+  flex:1; aspect-ratio:1; border-radius:16px; border:2px solid transparent; cursor:pointer;
+  background:rgba(74,59,99,.06); font-size:1.5rem; display:flex; align-items:center; justify-content:center;
+  transition:transform .15s ease, border-color .15s ease;
+}
+.outfit-option:hover { transform:translateY(-2px); }
+.outfit-option:focus-visible { outline:3px solid var(--plum); outline-offset:2px; }
+.outfit-option.picked { border-color:var(--glow); background:linear-gradient(160deg,var(--pink),var(--lilac)); }
+
+/* Cooking Chaos: order ticket */
+.order-ticket {
+  background:rgba(74,59,99,.06); border-radius:18px; padding:16px; text-align:center; margin:0 0 16px;
+}
+.order-ticket__label { font-family:var(--font-mono); font-size:.65rem; letter-spacing:.06em; text-transform:uppercase; color:var(--plum-soft); margin:0 0 8px; }
+.order-ticket__items { font-size:1.8rem; letter-spacing:.15em; }
+.cook-options { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:14px; }
+.cook-option {
+  aspect-ratio:1; border-radius:14px; border:none; cursor:pointer; font-size:1.4rem;
+  background:rgba(74,59,99,.06); transition:transform .15s ease;
+}
+.cook-option:hover { transform:scale(1.06); }
+.cook-option:focus-visible { outline:3px solid var(--plum); outline-offset:2px; }
+.cook-option.wrong-flash { background:#F3B8B8; }
+.cook-score { text-align:center; font-family:var(--font-mono); font-size:.8rem; color:var(--plum-soft); margin:0 0 6px; }
+
+/* ---------- shop (Pass 3) ---------- */
+.shop-tabs { display:flex; gap:8px; margin:0 0 16px; flex-wrap:wrap; justify-content:center; }
+.shop-tab { font-family:var(--font-mono); font-size:.68rem; letter-spacing:.04em; text-transform:uppercase; padding:7px 14px; border-radius:999px; border:none; cursor:pointer; background:rgba(74,59,99,.08); color:var(--plum-soft); }
+.shop-tab.active { background:linear-gradient(120deg,#FF9EDB,#B6A6FF); color:var(--white); }
+.shop-tab:focus-visible { outline:3px solid var(--plum); outline-offset:2px; }
+.shop-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin:0 0 6px; }
+.shop-item { border-radius:18px; border:2px solid transparent; background:rgba(74,59,99,.06); padding:14px 10px; text-align:center; cursor:pointer; }
+.shop-item:hover { transform:translateY(-2px); }
+.shop-item:focus-visible { outline:3px solid var(--plum); outline-offset:2px; }
+.shop-item.owned { border-color:var(--glow); background:linear-gradient(160deg,var(--pink),var(--lilac)); }
+.shop-item.equipped { border-color:#B88A00; }
+.shop-item__emoji { font-size:1.7rem; display:block; margin:0 0 6px; }
+.shop-item__name { font-size:.78rem; font-weight:600; display:block; margin:0 0 4px; }
+.shop-item__price { font-family:var(--font-mono); font-size:.7rem; color:var(--plum-soft); }
+.shop-item.owned .shop-item__price { color:#8A6A00; font-weight:700; }
+.shop-item:disabled { opacity:.5; cursor:not-allowed; }
+
+/* ---------- fairy avatar preview ---------- */
+.avatar-preview { text-align:center; font-size:2.6rem; margin:0 0 14px; }
+
+/* ---------- random event banner ---------- */
+.event-banner {
+  position:fixed; top:14px; left:50%; transform:translateX(-50%) translateY(-140%);
+  z-index:25; background:var(--white); border-radius:999px; padding:10px 20px;
+  box-shadow:0 12px 30px rgba(80,50,120,.35); font-family:var(--font-mono); font-size:.75rem;
+  display:flex; align-items:center; gap:8px; transition:transform .4s cubic-bezier(.34,1.56,.64,1);
+  white-space:nowrap; max-width:92vw;
+}
+.event-banner.show { transform:translateX(-50%) translateY(0); }
