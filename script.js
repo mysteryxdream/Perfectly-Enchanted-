@@ -407,6 +407,27 @@
     openChallengeOverlay();
   }
 
+  // ---------- 6. Fairy Library ----------
+  function startLibrary(){
+    const books = [
+      { title:"Moonlit Tales", fact:"Fairies who read at dusk see truer dreams." },
+      { title:"Petal & Ash", fact:"Every garden hides one door that only opens at midnight." },
+      { title:"The Lantern Keeper", fact:"A single kindness can light a whole forest." },
+      { title:"Whispers of the Grove", fact:"The oldest trees remember every wish ever made beneath them." },
+    ];
+    const book = books[Math.floor(Math.random()*books.length)];
+    challengeContent.innerHTML = `
+      <h2>📚 Fairy Library</h2>
+      <p class="challenge-modal__intro">You pull a book from the shelf: <strong>${book.title}</strong></p>
+      <p style="text-align:center; font-style:italic; color:var(--plum-soft);">"${book.fact}"</p>
+      <button class="jump-btn" id="libContinue">close the book</button>`;
+    document.getElementById("libContinue").addEventListener("click", ()=>{
+      showChallengeResult("📚", "story discovered", "a little lore is part of a perfect day too.", 8);
+    });
+    Game._activeCleanup = ()=>{};
+    openChallengeOverlay();
+  }
+
   // ================= PASS 3: shops, customization, random events =================
 
   // ---------- catalog ----------
@@ -430,6 +451,11 @@
       { id:"m1", name:"Lucky Charm", emoji:"🍀", price:35 },
       { id:"m2", name:"Dream Jar", emoji:"🫙", price:50 },
       { id:"m3", name:"Tiny Lantern", emoji:"🏮", price:45 },
+    ],
+    flowers: [
+      { id:"f1", name:"Wild Rose", emoji:"🌹", price:20 },
+      { id:"f2", name:"Moon Lily", emoji:"🌙", price:45 },
+      { id:"f3", name:"Sunburst Daisy", emoji:"🌻", price:35 },
     ],
   };
 
@@ -514,6 +540,9 @@
   function startMarket(){
     openShop("Fairy Market", "🛍️", [{key:"market",label:"lifestyle"}], "market");
   }
+  function startFlowerShop(){
+    openShop("Flower Shop", "🌷", [{key:"flowers",label:"blooms"}], "flowers");
+  }
   function startPark(){
     // light activity: quick relaxing mini-interaction, small guaranteed coin reward
     challengeContent.innerHTML = `
@@ -562,14 +591,16 @@
   // ---------- router: wires the map to the games/shops above ----------
   Game.onLocationOpen = function(key, name){
     switch (key){
-      case "keys":     startLostKeys(); break;
-      case "obby":     startFairyObby(); break;
-      case "boutique": startPerfectOutfit(); break;
-      case "garden":   startEnchantedGarden(); break;
-      case "cafe":     startCookingChaos(); break;
-      case "home":     startHome(); break;
-      case "market":   startMarket(); break;
-      case "park":     startPark(); break;
+      case "keys":        startLostKeys(); break;
+      case "obby":         startFairyObby(); break;
+      case "boutique":     startPerfectOutfit(); break;
+      case "garden":       startEnchantedGarden(); break;
+      case "cafe":         startCookingChaos(); break;
+      case "home":         startHome(); break;
+      case "market":       startMarket(); break;
+      case "park":         startPark(); break;
+      case "library":      startLibrary(); break;
+      case "flowershop":   startFlowerShop(); break;
       default: Game.showFeed(`${name} isn't ready yet`);
     }
   };
