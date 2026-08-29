@@ -1,87 +1,18 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>My Perfect Day 🧚‍♀️ an enchanted fairy lifestyle game</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&family=Outfit:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
+🌅24:00 left
+🪙 0
 
-  <div class="topbar">
-    <div class="clock"><span class="clock__phase" id="clockPhase">🌅</span><span id="clockText">24:00 left</span></div>
-    <div class="coins">🪙 <span id="coinCount">0</span></div>
-  </div>
+morningdayeveningnight
+my perfect day 🧚‍♀️
+tap a location to visit it
 
-  <div class="dayring-wrap">
-    <div class="dayring"><div class="dayring__fill" id="dayringFill"></div></div>
-    <div class="dayring__labels"><span>morning</span><span>day</span><span>evening</span><span>night</span></div>
-  </div>
+🧚‍♀️
+☕café 👗boutique 🌸garden 🏡home 🛍️market 🧚obby 🗝️lost keys 🌳park 📚library 🌷flower shop
 
-  <div class="title-wrap">
-    <h1>my perfect <span>day</span> 🧚‍♀️</h1>
-    <p class="title-sub" id="titleSub">tap a location to visit it</p>
-  </div>
+pass 3 of 3 — full game · html · css · js
+👑
+perfect day complete
+your 24 minutes are up — here's how your day went.
+start a new day ↺
+✕
 
-  <div class="map-wrap">
-    <div class="map" id="map">
-      <div class="map__stars" aria-hidden="true"></div>
-      <div class="fairy" id="fairy" style="left:50%; top:50%;">🧚‍♀️</div>
 
-      <button class="location" id="loc-cafe" style="left:20%; top:28%;" data-name="Enchanted Café">
-        <span class="location__bubble">☕</span><span class="location__label">café</span>
-      </button>
-      <button class="location" id="loc-boutique" style="left:78%; top:24%;" data-name="Fairy Boutique">
-        <span class="location__bubble">👗</span><span class="location__label">boutique</span>
-      </button>
-      <button class="location" id="loc-garden" style="left:15%; top:70%;" data-name="Enchanted Garden">
-        <span class="location__bubble">🌸</span><span class="location__label">garden</span>
-      </button>
-      <button class="location" id="loc-home" style="left:50%; top:80%;" data-name="Fairy Home">
-        <span class="location__bubble">🏡</span><span class="location__label">home</span>
-      </button>
-      <button class="location" id="loc-market" style="left:82%; top:66%;" data-name="Fairy Market">
-        <span class="location__bubble">🛍️</span><span class="location__label">market</span>
-      </button>
-      <button class="location" id="loc-obby" style="left:50%; top:16%;" data-name="Fairy Obby">
-        <span class="location__bubble">🧚</span><span class="location__label">obby</span>
-      </button>
-      <button class="location" id="loc-keys" style="left:36%; top:48%;" data-name="Lost Keys">
-        <span class="location__bubble">🗝️</span><span class="location__label">lost keys</span>
-      </button>
-      <button class="location" id="loc-park" style="left:64%; top:50%;" data-name="Fairy Park">
-        <span class="location__bubble">🌳</span><span class="location__label">park</span>
-      </button>
-    </div>
-  </div>
-
-  <div class="feed">
-    <div class="feed__msg" id="feedMsg"></div>
-  </div>
-
-  <p class="footer">pass 3 of 3 — full game · html · css · js</p>
-
-  <div class="modal-overlay" id="endModal">
-    <div class="modal">
-      <div style="font-size:2.4rem;">👑</div>
-      <h2>perfect day complete</h2>
-      <p id="endSummary">your 24 minutes are up — here's how your day went.</p>
-      <button id="restartDayBtn">start a new day ↺</button>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="challengeOverlay">
-    <div class="modal challenge-modal" id="challengeModal" style="position:relative;">
-      <button class="challenge-modal__close" id="challengeCloseBtn" aria-label="close">✕</button>
-      <div id="challengeContent"></div>
-    </div>
-  </div>
-
-  <div class="event-banner" id="eventBanner"></div>
-
-<script src="script.js"></script>
-</body>
-</html>
